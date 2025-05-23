@@ -1,0 +1,11 @@
+{
+    "INPUT": {
+        "PATH": "data/input/cliffbar/imgs"
+    },
+    "OUTPUT": {
+        "PATH": "data/output",
+        "FILES": {
+            "VIDEO": "annotated_video.mp4"
+        }
+    }
+}
