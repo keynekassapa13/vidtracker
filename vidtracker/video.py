@@ -26,13 +26,7 @@ def process_video(cfg):
     tracker = MILTracker(
         first_frame=first_frame,
         init_bbox=init_bbox,
-        M=cfg.MIL.M,
-        K=cfg.MIL.K,
-        s=cfg.MIL.s,
-        r=cfg.MIL.r,
-        beta=cfg.MIL.beta,
-        neg_count=cfg.MIL.neg_count,
-        lr=cfg.MIL.lr,
+        cfg=cfg
     )
     cv2.destroyWindow("Select Object")
 
@@ -44,10 +38,11 @@ def process_video(cfg):
         cx, cy = tracker.process_frame(frame)
         x1 = int(cx - tracker.w  / 2)
         y1 = int(cy - tracker.h / 2)
-        x2 = x1 + tracker.w
-        y2 = y1 + tracker.h
+        x2 = int(x1 + tracker.w)
+        y2 = int(y1 + tracker.h)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.imshow("MILTrack", frame)
+        logger.info(f"Frame {i+1}/{len(frames)-1}: {fname}")
         cv2.waitKey(1)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break

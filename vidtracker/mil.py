@@ -123,17 +123,18 @@ MILBoost - Multiple Instance Learning with Boosting
 Boosting algorithm goal is to combine many weak classifier into additive strong classifier
 """
 class OnlineMILBoost:
-    def __init__(self, win_w, win_h, M=250, K=50, lr=0.85):
+    def __init__(self, win_w, win_h, cfg):
         """
         Args:
             win_w, win_h: window width and height
-            M: number of weak classifiers
-            K: number of selected classifiers
-            lr: learning rate for updating mean and std
+            cfg: configuration object with parameters
+                cfg.MIL.M: number of weak classifiers
+                cfg.MIL.K: number of selected classifiers
+                cfg.MIL.lr: learning rate for updating mean and std
         """
         self.win_w, self.win_h = win_w, win_h
-        self.pool = [WeakClassifier(HaarFeature(win_w, win_h), lr) for _ in range(M)]
-        self.M, self.K = M, K
+        self.pool = [WeakClassifier(HaarFeature(win_w, win_h, min_rects=cfg.MIL.min_rects, max_rects=cfg.MIL.max_rects), cfg.MIL.lr) for _ in range(cfg.MIL.M)]
+        self.M, self.K = cfg.MIL.M, cfg.MIL.K
         self.selected = []
 
     @staticmethod
@@ -254,26 +255,34 @@ class OnlineMILBoost:
     
 
 class MILTracker:
-    def __init__(self, first_frame, init_bbox, M=250, K=50, s=35, r=5, beta=50, neg_count=65, lr=0.85):
+    def __init__(self, first_frame, init_bbox, cfg):
         """
         Args:
             first_frame: first frame of the video
             init_bbox: initial bounding box (x, y, width, height)
-            M: number of weak classifiers
-            K: number of selected classifiers
-            s: search radius (candidate locations)
-            r: positive sample radius
-            beta: negative sample radius
-            neg_count: number of negative samples
-            lr: learning rate for updating mean and std
+            cfg: configuration object with parameters
+                MIL.s_rad: search radius (candidate locations)
+                MIL.pos_rad: positive sample radius
+                MIL.neg_rad: negative sample radius
+                MIL.num_neg: number of negative samples
+                MIL.lr: learning rate for updating mean and std
         """
         x, y, w, h = init_bbox
         self.w, self.h = w, h
         self.loc = (x + w // 2, y + h // 2)         # center of the bounding box
-        self.s, self.r, self.beta, self.neg_count = s, r, beta, neg_count
+        
+        self.s_rad = cfg.MIL.s_rad
+        self.pos_rad = cfg.MIL.pos_rad
+        self.neg_rad = cfg.MIL.neg_rad
+        self.num_neg = cfg.MIL.num_neg
+
+        self.dynamic = cfg.MIL.dynamic
+        self.dyn_scale = cfg.MIL.dyn_scale
+        self.num_tries = cfg.MIL.num_tries
+        
         gray = cv2.cvtColor(first_frame, cv2.COLOR_BGR2GRAY)
         self.img_h, self.img_w = gray.shape
-        self.model = OnlineMILBoost(w, h, M=M, K=K, lr=lr)
+        self.model = OnlineMILBoost(w, h, cfg)
         ii = cv2.integral(gray)
         pos = self._sample_pos(self.loc)
         neg = self._sample_neg(self.loc)
@@ -287,9 +296,9 @@ class MILTracker:
         cx, cy = center
         hw, hh = self.w // 2, self.h // 2
         pts = []
-        for dx in range(-self.r, self.r + 1):
-            for dy in range(-self.r, self.r + 1):
-                if dx*dx + dy*dy <= self.r*self.r:          # if the point is within the radius
+        for dx in range(-self.pos_rad, self.pos_rad + 1):
+            for dy in range(-self.pos_rad, self.pos_rad + 1):
+                if dx*dx + dy*dy <= self.pos_rad*self.pos_rad:          # if the point is within the radius
                     x_c, y_c = cx + dx, cy + dy             # new center coordinates
                     x0, y0 = x_c - hw, y_c - hh             # top-left corner of thenew bounding box
                     if 0 <= x0 <= self.img_w - self.w and 0 <= y0 <= self.img_h - self.h:
@@ -304,11 +313,11 @@ class MILTracker:
         cx, cy = center
         hw, hh = self.w // 2, self.h // 2
         pts = []
-        while len(pts) < self.neg_count:
-            dx = random.randint(-self.beta, self.beta)
-            dy = random.randint(-self.beta, self.beta)
+        while len(pts) < self.num_neg:
+            dx = random.randint(-self.neg_rad, self.neg_rad)
+            dy = random.randint(-self.neg_rad, self.neg_rad)
             dist2 = dx*dx + dy*dy
-            if self.r*self.r < dist2 <= self.beta*self.beta: # exclude points within the positive radius
+            if self.pos_rad*self.pos_rad < dist2 <= self.neg_rad*self.neg_rad: # exclude points within the positive radius
                 x_c, y_c = cx + dx, cy + dy
                 x0, y0 = x_c - hw, y_c - hh
                 if 0 <= x0 <= self.img_w - self.w and 0 <= y0 <= self.img_h - self.h:
@@ -328,19 +337,21 @@ class MILTracker:
         hw, hh = self.w // 2, self.h // 2
         
         cands = []              # candidate locations for the bounding box
-        num_tries = 5
 
-        for _ in range(num_tries):
-            # dw = random.randint(-self.w // 8, self.w // 8)
-            # dh = random.randint(-self.h // 8, self.h // 8)
-            # w_scaled = self.w + dw if abs(dw) < self.w // 2 else self.w
-            # h_scaled = self.h + dh if abs(dh) < self.h // 2 else self.h
-            w_scaled = self.w
-            h_scaled = self.h
+        nt = self.num_tries if self.dynamic else 1
+        for _ in range(nt):
+            if self.dynamic:
+                dw = random.uniform(-self.dyn_scale, self.dyn_scale) * self.w
+                dh = random.uniform(-self.dyn_scale, self.dyn_scale) * self.h
+                w_scaled = self.w + dw if abs(dw) < self.w // 2 else self.w
+                h_scaled = self.h + dh if abs(dh) < self.h // 2 else self.h
+            else:
+                w_scaled = self.w
+                h_scaled = self.h
             hw, hh = w_scaled // 2, h_scaled // 2
 
-            for dx in range(-self.s, self.s + 1, 4):
-                for dy in range(-self.s, self.s + 1, 4):
+            for dx in range(-self.s_rad, self.s_rad + 1, 4):
+                for dy in range(-self.s_rad, self.s_rad + 1, 4):
                     x_c, y_c = cx + dx, cy + dy
                     x0, y0 = x_c - hw, y_c - hh
                     if 0 <= x0 <= self.img_w - w_scaled and 0 <= y0 <= self.img_h - h_scaled:
