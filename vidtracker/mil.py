@@ -1,3 +1,9 @@
+"""
+Re-implementation of paper 
+Visual Tracking with Online Multiple Instance Learning 
+Babenko et al. (2009)
+"""
+
 import cv2
 import numpy as np
 import random
@@ -5,7 +11,7 @@ import math
 from loguru import logger
 
 class HaarFeature:
-    def __init__(self, win_w, win_h, min_rects=2, max_rects=6, use_channels=None):
+    def __init__(self, win_w, win_h, min_rects=2, max_rects=30, use_channels=None):
         """
         Args:
             win_w, win_h: window width and height
@@ -19,34 +25,46 @@ class HaarFeature:
             self.channel = random.choice(use_channels)
         else:
             self.channel = None
+
         n = random.randint(self.min_rects, self.max_rects)
-        self.rects = []
+        self.rel_rects = []  # relative rectangles: (x_ratio, y_ratio, w_ratio, h_ratio)
         self.weights = []
         self._max_sum = 0.0
+
         for _ in range(n):
             w = random.random() * 2 - 1
-            x1 = random.randint(0, win_w - 3)
-            y1 = random.randint(0, win_h - 3)
-            w_rect = random.randint(1, win_w - x1 - 2)
-            h_rect = random.randint(1, win_h - y1 - 2)
-            self.rects.append((x1, y1, w_rect, h_rect))
+            x1 = random.uniform(0, 0.9)
+            y1 = random.uniform(0, 0.9)
+            w_rect = random.uniform(0.05, 1.0 - x1)
+            h_rect = random.uniform(0.05, 1.0 - y1)
+            self.rel_rects.append((x1, y1, w_rect, h_rect))
             self.weights.append(w)
-            self._max_sum += abs(w * (w_rect + 1) * (h_rect + 1) * 255.0)
+            self._max_sum += abs(w * (w_rect * win_w + 1) * (h_rect * win_h + 1) * 255.0)
 
-    def compute(self, ii_list, x0, y0):
+
+    def compute(self, ii_list, x0, y0, win_w=None, win_h=None):
         """
         Args:
             ii_list: integral image list, one for each channel
             x0, y0: top-left corner of the window
+            win_w, win_h: window width and height (optional)
         Returns:
             val: computed feature value
         """
+        if win_w is None: win_w = self.win_w
+        if win_h is None: win_h = self.win_h
+
         if self.channel is not None:
             ii = ii_list[self.channel]
         else:
             ii = ii_list
+
         val = 0.0
-        for (x1, y1, w_rect, h_rect), w in zip(self.rects, self.weights):
+        for (rx, ry, rw, rh), w in zip(self.rel_rects, self.weights):
+            x1 = int(rx * win_w)
+            y1 = int(ry * win_h)
+            w_rect = int(rw * win_w)
+            h_rect = int(rh * win_h)
             xa, ya = x0 + x1, y0 + y1
             xb, yb = xa + w_rect + 1, ya + h_rect + 1
             s = ii[yb, xb] - ii[ya, xb] - ii[yb, xa] + ii[ya, xa]
@@ -127,7 +145,7 @@ class OnlineMILBoost:
             z = math.exp(x)
             return z / (1.0 + z)
 
-    def train_frame(self, ii, pos_centers, neg_centers):
+    def train_frame(self, ii, pos_centers, neg_centers, win_w=None, win_h=None):
         """
         Args:
             ii: integral image
@@ -137,6 +155,11 @@ class OnlineMILBoost:
             self.pool: list of weak classifiers
             self.selected: list of selected classifiers
         """
+        # Update window size
+        if win_w is None: win_w = self.win_w
+        if win_h is None: win_h = self.win_h
+        self.win_w, self.win_h = win_w, win_h
+
         H_img, W_img = ii.shape[0]-1, ii.shape[1]-1
         hw, hh = self.win_w // 2, self.win_h // 2
         coords, labels = [], []
@@ -168,7 +191,7 @@ class OnlineMILBoost:
             # h is the weak classifier
             # each weak classifier compute its feature value for every patch
             for i, (x0, y0) in enumerate(coords):
-                all_feats[m, i] = h.feature.compute(ii, x0, y0)
+                all_feats[m, i] = h.feature.compute(ii, x0, y0, win_w=win_w, win_h=win_h)
             # each weak classifier updates the mean and std
             h.update(all_feats[m], L)
 
@@ -203,7 +226,7 @@ class OnlineMILBoost:
             # Update the selected weak classifier
             H_sel += np.array([best_h.score(v) for v in all_feats[bidx]])
 
-    def score_patch(self, ii, cx, cy):
+    def score_patch(self, ii, cx, cy, win_w=None, win_h=None):
         """
         Probability of the patch being positive
         Args:
@@ -212,14 +235,125 @@ class OnlineMILBoost:
         Returns:
             Hval: computed score for the patch
         """
-        hw, hh = self.win_w // 2, self.win_h // 2
+        if win_w is None: win_w = self.win_w
+        if win_h is None: win_h = self.win_h
+
+        hw, hh = win_w // 2, win_h // 2
         x0, y0 = int(cx - hw), int(cy - hh)
         Hval = 0.0
+
         for h in self.selected:
             # h is the weak classifier
             # h.feature is the Haar feature
             # h,feature.compute is the feature value for the patch
             # Hval is the sum of the feature values - in log-odds space
-            Hval += h.score(h.feature.compute(ii, x0, y0))
+            Hval += h.score(h.feature.compute(ii, x0, y0, win_w=win_w, win_h=win_h))
+        
         # Instance Probability
         return self.sigmoid(Hval)
+    
+
+class MILTracker:
+    def __init__(self, first_frame, init_bbox, M=250, K=50, s=35, r=5, beta=50, neg_count=65, lr=0.85):
+        """
+        Args:
+            first_frame: first frame of the video
+            init_bbox: initial bounding box (x, y, width, height)
+            M: number of weak classifiers
+            K: number of selected classifiers
+            s: search radius (candidate locations)
+            r: positive sample radius
+            beta: negative sample radius
+            neg_count: number of negative samples
+            lr: learning rate for updating mean and std
+        """
+        x, y, w, h = init_bbox
+        self.w, self.h = w, h
+        self.loc = (x + w // 2, y + h // 2)         # center of the bounding box
+        self.s, self.r, self.beta, self.neg_count = s, r, beta, neg_count
+        gray = cv2.cvtColor(first_frame, cv2.COLOR_BGR2GRAY)
+        self.img_h, self.img_w = gray.shape
+        self.model = OnlineMILBoost(w, h, M=M, K=K, lr=lr)
+        ii = cv2.integral(gray)
+        pos = self._sample_pos(self.loc)
+        neg = self._sample_neg(self.loc)
+        self.model.train_frame(ii, pos, neg)
+
+    def _sample_pos(self, center):
+        """
+        Args:
+            center: center coordinates of the bounding box
+        """
+        cx, cy = center
+        hw, hh = self.w // 2, self.h // 2
+        pts = []
+        for dx in range(-self.r, self.r + 1):
+            for dy in range(-self.r, self.r + 1):
+                if dx*dx + dy*dy <= self.r*self.r:          # if the point is within the radius
+                    x_c, y_c = cx + dx, cy + dy             # new center coordinates
+                    x0, y0 = x_c - hw, y_c - hh             # top-left corner of thenew bounding box
+                    if 0 <= x0 <= self.img_w - self.w and 0 <= y0 <= self.img_h - self.h:
+                        pts.append((x_c, y_c))
+        return pts
+
+    def _sample_neg(self, center):
+        """
+        Args:
+            center: center coordinates of the bounding box
+        """
+        cx, cy = center
+        hw, hh = self.w // 2, self.h // 2
+        pts = []
+        while len(pts) < self.neg_count:
+            dx = random.randint(-self.beta, self.beta)
+            dy = random.randint(-self.beta, self.beta)
+            dist2 = dx*dx + dy*dy
+            if self.r*self.r < dist2 <= self.beta*self.beta: # exclude points within the positive radius
+                x_c, y_c = cx + dx, cy + dy
+                x0, y0 = x_c - hw, y_c - hh
+                if 0 <= x0 <= self.img_w - self.w and 0 <= y0 <= self.img_h - self.h:
+                    pts.append((x_c, y_c))
+        return pts
+
+    def process_frame(self, frame):
+        """
+        Args:
+            frame: current frame of the video
+        Returns:
+            loc: updated location of the bounding box
+        """
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        ii = cv2.integral(gray)
+        cx, cy = self.loc
+        hw, hh = self.w // 2, self.h // 2
+        
+        cands = []              # candidate locations for the bounding box
+        num_tries = 5
+
+        for _ in range(num_tries):
+            # dw = random.randint(-self.w // 8, self.w // 8)
+            # dh = random.randint(-self.h // 8, self.h // 8)
+            # w_scaled = self.w + dw if abs(dw) < self.w // 2 else self.w
+            # h_scaled = self.h + dh if abs(dh) < self.h // 2 else self.h
+            w_scaled = self.w
+            h_scaled = self.h
+            hw, hh = w_scaled // 2, h_scaled // 2
+
+            for dx in range(-self.s, self.s + 1, 4):
+                for dy in range(-self.s, self.s + 1, 4):
+                    x_c, y_c = cx + dx, cy + dy
+                    x0, y0 = x_c - hw, y_c - hh
+                    if 0 <= x0 <= self.img_w - w_scaled and 0 <= y0 <= self.img_h - h_scaled:
+                        score = self.model.score_patch(ii, x_c, y_c, win_w=w_scaled, win_h=h_scaled)
+                        cands.append((score, (x_c, y_c), (w_scaled, h_scaled)))
+
+        # argmax - find the candidate location with the highest score
+        if cands:
+            best_score, best_loc, best_size = max(cands, key=lambda x: x[0])
+            self.loc = best_loc
+            self.w, self.h = best_size
+
+        pos = self._sample_pos(self.loc)
+        neg = self._sample_neg(self.loc)
+        self.model.train_frame(ii, pos, neg, win_w=self.w, win_h=self.h)
+        return self.loc

@@ -27,14 +27,20 @@ def show_haar_feature():
     ii = create_integral_image(img)
 
     haar = HaarFeature(win_w, win_h)
-    feature_value = haar.compute(ii, 0, 0)
+    feature_value = haar.compute(ii, 0, 0, win_w=win_w, win_h=win_h)
 
     fig, ax = plt.subplots()
     ax.imshow(img, cmap='gray')
-    for (x1, y1, w, h), wgt in zip(haar.rects, haar.weights):
+
+    for (rx, ry, rw, rh), wgt in zip(haar.rel_rects, haar.weights):
+        x = int(rx * win_w)
+        y = int(ry * win_h)
+        w = min(int(rw * win_w), win_w - x - 1)
+        h = min(int(rh * win_h), win_h - y - 1)
         color = 'red' if wgt < 0 else 'blue'
-        rect = plt.Rectangle((x1, y1), w + 1, h + 1, edgecolor=color, facecolor='none', linewidth=2)
+        rect = plt.Rectangle((x, y), w + 1, h + 1, edgecolor=color, facecolor='none', linewidth=2)
         ax.add_patch(rect)
+
     plt.title(f"Haar Feature Visualization\nFeature Value: {feature_value:.2f}")
     plt.axis('off')
     plt.tight_layout()

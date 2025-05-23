@@ -7,5 +7,16 @@
         "FILES": {
             "VIDEO": "annotated_video.mp4"
         }
+    },
+    "MIL": {
+        "M": 250,
+        "K": 50,
+        "s": 35,
+        "r": 5,
+        "beta": 50,
+        "neg_count": 65,
+        "lr": 0.85
     }
 }
+
+    
