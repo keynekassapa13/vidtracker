@@ -99,3 +99,127 @@ class WeakClassifier:
         p0 = math.exp(-0.5 * ((val - self.mu_neg) / self.sigma_neg) ** 2) / (self.sigma_neg * math.sqrt(2 * math.pi))
         # log odds (logit)
         return math.log((p1 + 1e-12) / (p0 + 1e-12))
+
+"""
+MILBoost - Multiple Instance Learning with Boosting
+Boosting algorithm goal is to combine many weak classifier into additive strong classifier
+"""
+class OnlineMILBoost:
+    def __init__(self, win_w, win_h, M=250, K=50, lr=0.85):
+        """
+        Args:
+            win_w, win_h: window width and height
+            M: number of weak classifiers
+            K: number of selected classifiers
+            lr: learning rate for updating mean and std
+        """
+        self.win_w, self.win_h = win_w, win_h
+        self.pool = [WeakClassifier(HaarFeature(win_w, win_h), lr) for _ in range(M)]
+        self.M, self.K = M, K
+        self.selected = []
+
+    @staticmethod
+    def sigmoid(x):
+        if x >= 0:
+            z = math.exp(-x)
+            return 1.0 / (1.0 + z)
+        else:
+            z = math.exp(x)
+            return z / (1.0 + z)
+
+    def train_frame(self, ii, pos_centers, neg_centers):
+        """
+        Args:
+            ii: integral image
+            pos_centers: list of positive center coordinates
+            neg_centers: list of negative center coordinates
+        Update:
+            self.pool: list of weak classifiers
+            self.selected: list of selected classifiers
+        """
+        H_img, W_img = ii.shape[0]-1, ii.shape[1]-1
+        hw, hh = self.win_w // 2, self.win_h // 2
+        coords, labels = [], []
+
+        # Extract pos patches
+        for cx, cy in pos_centers:
+            x0, y0 = int(cx - hw), int(cy - hh)
+            if 0 <= x0 <= W_img - self.win_w and 0 <= y0 <= H_img - self.win_h:
+                coords.append((x0, y0))
+                labels.append(1)
+        # Extract neg patches
+        for cx, cy in neg_centers:
+            x0, y0 = int(cx - hw), int(cy - hh)
+            if 0 <= x0 <= W_img - self.win_w and 0 <= y0 <= H_img - self.win_h:
+                coords.append((x0, y0))
+                labels.append(0)
+        
+        if not coords:
+            return
+        
+        N_pos = sum(labels)
+        N = len(coords)
+        L = np.array(labels, dtype=np.int32)
+        # Feature matrix
+        all_feats = np.zeros((self.M, N))
+
+        for m, h in enumerate(self.pool):
+            # m is the index of the weak classifier
+            # h is the weak classifier
+            # each weak classifier compute its feature value for every patch
+            for i, (x0, y0) in enumerate(coords):
+                all_feats[m, i] = h.feature.compute(ii, x0, y0)
+            # each weak classifier updates the mean and std
+            h.update(all_feats[m], L)
+
+        # Select K weak classifiers
+        # Algo 2 in paper
+        H_sel = np.zeros(N)         # H_sel is the sum of the selected weak classifiers
+        self.selected = []          # selected weak classifiers
+        for _ in range(self.K):
+            best_h, best_ll = None, -np.inf
+            for idx, h in enumerate(self.pool):
+                if h in self.selected:
+                    continue
+
+                ll = 0.0
+                one_minus = 1.0
+                for i in np.where(labels == 1)[0]:
+                    s = self.sigmoid(H_sel[i] + h.score(all_feats[idx, i]))
+                    one_minus *= (1.0 - s)
+                ll += math.log(1.0 - one_minus + 1e-12)
+
+                for i in np.where(labels == 0)[0]:
+                    s = self.sigmoid(H_sel[i] + h.score(all_feats[idx, i]))
+                    ll += math.log(1.0 - s + 1e-12)
+
+                # argmax
+                if ll > best_ll:
+                    best_ll, best_h = ll, h
+            if best_h is None:
+                break
+            self.selected.append(best_h)        # add the best weak classifier to the selected list
+            bidx = self.pool.index(best_h)      # get the index of the best weak classifier
+            # Update the selected weak classifier
+            H_sel += np.array([best_h.score(v) for v in all_feats[bidx]])
+
+    def score_patch(self, ii, cx, cy):
+        """
+        Probability of the patch being positive
+        Args:
+            ii: integral image
+            cx, cy: center coordinates of the patch
+        Returns:
+            Hval: computed score for the patch
+        """
+        hw, hh = self.win_w // 2, self.win_h // 2
+        x0, y0 = int(cx - hw), int(cy - hh)
+        Hval = 0.0
+        for h in self.selected:
+            # h is the weak classifier
+            # h.feature is the Haar feature
+            # h,feature.compute is the feature value for the patch
+            # Hval is the sum of the feature values - in log-odds space
+            Hval += h.score(h.feature.compute(ii, x0, y0))
+        # Instance Probability
+        return self.sigmoid(Hval)

@@ -1,12 +1,15 @@
-from vidtracker.mil import HaarFeature, WeakClassifier
+from vidtracker.mil import HaarFeature, WeakClassifier, OnlineMILBoost
 import numpy as np
 import matplotlib.pyplot as plt
 
-def create_image(win_w, win_h):
+def create_image(win_w, win_h, is_positive=False):
     """
     Create a random image of given width and height.
     """
-    return np.random.randint(0, 256, size=(win_h, win_w), dtype=np.uint8)
+    img = np.random.randint(0, 256, size=(win_h, win_w), dtype=np.uint8)
+    if is_positive:
+        img[win_h//4:3*win_h//4, win_w//4:3*win_w//4] = 200
+    return img
 
 def create_integral_image(img):
     """
@@ -70,5 +73,40 @@ def show_weak_classifier():
     plt.ylabel("Score")
     plt.legend()
     plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+def show_online_MIL_boost():
+    win_w, win_h = 24, 24
+    milboost = OnlineMILBoost(win_w, win_h, M=30, K=10)
+    center = (win_w // 2, win_h // 2)
+
+    # Train on 15 positive and negative frames
+    for _ in range(15):
+        pos_img = create_image(win_w, win_h, is_positive=True)
+        neg_img = create_image(win_w, win_h, is_positive=False)
+        ii_pos = create_integral_image(pos_img)
+        ii_neg = create_integral_image(neg_img)
+        milboost.train_frame(ii=ii_pos, pos_centers=[center], neg_centers=[])
+        milboost.train_frame(ii=ii_neg, pos_centers=[], neg_centers=[center])
+
+    test_pos = create_image(win_w, win_h, is_positive=True)
+    test_neg = create_image(win_w, win_h, is_positive=False)
+    ii_test_pos = create_integral_image(test_pos)
+    ii_test_neg = create_integral_image(test_neg)
+
+    score_pos = milboost.score_patch(ii_test_pos, *center)
+    score_neg = milboost.score_patch(ii_test_neg, *center)
+
+    print("Score (positive patch):", score_pos)
+    print("Score (negative patch):", score_neg)
+    fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+    axs[0].imshow(test_pos, cmap='gray')
+    axs[0].set_title(f"Positive Patch\nScore: {score_pos:.2f}")
+    axs[0].axis('off')
+    axs[1].imshow(test_neg, cmap='gray')
+    axs[1].set_title(f"Negative Patch\nScore: {score_neg:.2f}")
+    axs[1].axis('off')
+    plt.suptitle("OnlineMILBoost Patch Scoring")
     plt.tight_layout()
     plt.show()
