@@ -8,6 +8,7 @@
             "VIDEO": "annotated_video.mp4"
         }
     },
+    "TRACKER": "DFS",
     "MIL": {
         "M": 150,
         "K": 50,
@@ -29,9 +30,10 @@
         "sigma_s_list": [4.0, 2.0],
         "sigma_f": 1.0,
         "lambda_": 0.95,
+        "s_rad": 16,
         "dynamic": true,
-        "dyn_scale": 0.3,
-        "num_tries": 10,
+        "dyn_scale": 0,
+        "num_tries": 1,
         "num_angles": 5,
         "max_delta": 10
     }

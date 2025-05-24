@@ -32,12 +32,23 @@ def process_video(cfg):
     
     first_frame = cv2.imread(frames[0])
     init_bbox = cv2.selectROI("Select Object", first_frame, showCrosshair=False, fromCenter=False)
-    tracker = MILTracker(
-        first_frame=first_frame,
-        init_bbox=init_bbox,
-        cfg=cfg
-    )
-    
+    if cfg.TRACKER == "MIL":
+        logger.info(f"Using MIL Tracker with config: {cfg.MIL}")
+        tracker = MILTracker(
+            first_frame=first_frame,
+            init_bbox=init_bbox,
+            cfg=cfg
+        )
+    elif cfg.TRACKER == "DFS":
+        logger.info(f"Using DFS Tracker with config: {cfg.DFS}")
+        tracker = DFSTracker(
+            first_frame=first_frame,
+            init_bbox=init_bbox,
+            cfg=cfg
+        )
+    else:
+        logger.error(f"Unsupported tracker type: {cfg.TRACKER}")
+        return
     cv2.destroyWindow("Select Object")
 
     for i, fname in enumerate(frames[1:]):
@@ -52,7 +63,7 @@ def process_video(cfg):
         box   = np.int0(box)                # integer coords
         cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
 
-        cv2.imshow("MILTrack", frame)
+        cv2.imshow(f"{cfg.TRACK}Track", frame)
         logger.info(f"Frame {i}/{len(frames)-1}: {fname}")
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
