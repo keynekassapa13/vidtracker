@@ -1,6 +1,8 @@
 from vidtracker.mil import HaarFeature, WeakClassifier, OnlineMILBoost
+from vidtracker.dfs import explode, convolve, gaussian_kernel
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2
 
 def create_image(win_w, win_h, is_positive=False):
     """
@@ -116,3 +118,75 @@ def show_online_MIL_boost():
     plt.suptitle("OnlineMILBoost Patch Scoring")
     plt.tight_layout()
     plt.show()
+
+def show_explode_and_convolve():
+    patch = np.zeros((100, 100), dtype=np.uint8)
+    cv2.circle(patch, (50, 50), 20, 180, -1)
+
+    bins = 8
+    sigma = 2.0
+    df = explode(patch, bins)
+    kernel = gaussian_kernel(sigma)
+
+    df_smooth = np.zeros_like(df)
+    for k in range(bins):
+        df_smooth[..., k] = convolve(df[..., k], kernel)
+
+    plt.figure(figsize=(12, 9))
+
+    plt.subplot(3, bins, 1)
+    plt.title("Original")
+    plt.imshow(patch, cmap='gray')
+    plt.axis('off')
+
+    for k in range(bins):
+        plt.subplot(3, bins, bins + k + 1)
+        plt.title(f"Bin {k}")
+        plt.imshow(df[..., k], cmap='gray', vmin=0, vmax=1)
+        plt.axis('off')
+
+        plt.subplot(3, bins, 2*bins + k + 1)
+        plt.title(f"Smoothed {k}")
+        plt.imshow(df_smooth[..., k], cmap='gray')
+        plt.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+def show_smoothing():
+    df = np.zeros((1, 1, 8), dtype=np.float32)
+    df[0, 0, 5] = 1.0  
+    sigma_f = 1.0
+    r = int(3 * sigma_f)
+    ax = np.arange(-r, r+1, dtype=np.float32)
+    kernel = np.exp(-ax**2 / (2 * sigma_f**2))
+    kernel /= np.sum(kernel)
+    print(f"ax: {ax}")
+    print(f"kernel: {kernel}")
+
+    pad = np.pad(df, ((0, 0), (0, 0), (r, r)), mode='constant')
+    print(f"df: {df}")
+    print(f"pad: {pad}")
+
+    smoothed = np.zeros(8, dtype=np.float32)
+    for i in range(8):
+        window = pad[0, 0, i:i + 2*r + 1]
+        smoothed[i] = np.dot(window, kernel)
+
+    plt.figure(figsize=(8, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.title("Before Smoothing (One-hot)")
+    plt.stem(df[0, 0, :], basefmt=" ")
+    plt.xlabel("Bin Index")
+    plt.ylim(0, 1.1)
+
+    plt.subplot(1, 2, 2)
+    plt.title("After Feature Smoothing")
+    plt.stem(smoothed, basefmt=" ")
+    plt.xlabel("Bin Index")
+    plt.ylim(0, 1.1)
+
+    plt.tight_layout()
+    plt.show()
+    
