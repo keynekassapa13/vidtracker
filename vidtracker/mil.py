@@ -266,10 +266,16 @@ class MILTracker:
                 MIL.neg_rad: negative sample radius
                 MIL.num_neg: number of negative samples
                 MIL.lr: learning rate for updating mean and std
+                MIL.dynamic: whether to use dynamic scale
+                MIL.dyn_scale: scale factor for dynamic scaling
+                MIL.num_tries: number of tries for dynamic scale
+                MIL.num_angles: number of angles to sample
+                MIL.max_delta: maximum angle delta for rotation
         """
         x, y, w, h = init_bbox
         self.w, self.h = w, h
         self.loc = (x + w // 2, y + h // 2)         # center of the bounding box
+        self.angle = 0.0 # angle
         
         self.s_rad = cfg.MIL.s_rad
         self.pos_rad = cfg.MIL.pos_rad
@@ -279,6 +285,8 @@ class MILTracker:
         self.dynamic = cfg.MIL.dynamic
         self.dyn_scale = cfg.MIL.dyn_scale
         self.num_tries = cfg.MIL.num_tries
+        self.num_angles = cfg.MIL.num_angles
+        self.max_delta = cfg.MIL.max_delta
         
         gray = cv2.cvtColor(first_frame, cv2.COLOR_BGR2GRAY)
         self.img_h, self.img_w = gray.shape
@@ -332,39 +340,58 @@ class MILTracker:
             loc: updated location of the bounding box
         """
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        ii = cv2.integral(gray)
+        H_img, W_img = gray.shape
         cx, cy = self.loc
-        hw, hh = self.w // 2, self.h // 2
+
+        best_score = -1e9
+        best = None  # to hold (score, x, y, w, h, angle)
         
-        cands = []              # candidate locations for the bounding box
+        angles = np.linspace(self.angle - self.max_delta,
+                             self.angle + self.max_delta,
+                             self.num_angles)
 
         nt = self.num_tries if self.dynamic else 1
         for _ in range(nt):
+            # Dynamic scaling
             if self.dynamic:
                 dw = random.uniform(-self.dyn_scale, self.dyn_scale) * self.w
                 dh = random.uniform(-self.dyn_scale, self.dyn_scale) * self.h
-                w_scaled = self.w + dw if abs(dw) < self.w // 2 else self.w
-                h_scaled = self.h + dh if abs(dh) < self.h // 2 else self.h
+                w_scaled = int(self.w + dw)
+                h_scaled = int(self.h + dh)
             else:
-                w_scaled = self.w
-                h_scaled = self.h
-            hw, hh = w_scaled // 2, h_scaled // 2
+                w_scaled, h_scaled = self.w, self.h
 
-            for dx in range(-self.s_rad, self.s_rad + 1, 4):
-                for dy in range(-self.s_rad, self.s_rad + 1, 4):
-                    x_c, y_c = cx + dx, cy + dy
-                    x0, y0 = x_c - hw, y_c - hh
-                    if 0 <= x0 <= self.img_w - w_scaled and 0 <= y0 <= self.img_h - h_scaled:
-                        score = self.model.score_patch(ii, x_c, y_c, win_w=w_scaled, win_h=h_scaled)
-                        cands.append((score, (x_c, y_c), (w_scaled, h_scaled)))
+            # Search radius dx dy
+            for dx in range(-self.s_rad, self.s_rad+1, 4):
+                for dy in range(-self.s_rad, self.s_rad+1, 4):
+                    x_c = cx + dx
+                    y_c = cy + dy
+                    if not (0 <= x_c-h_scaled//2 and x_c+h_scaled//2 <= W_img): continue
+                    if not (0 <= y_c-w_scaled//2 and y_c+w_scaled//2 <= H_img): continue
+                    # Each angle
+                    for theta in angles:
+                        # Rotation matrix
+                        M = cv2.getRotationMatrix2D((x_c, y_c), theta, 1.0)
+                        # Warp the image
+                        warped = cv2.warpAffine(gray, M, (W_img, H_img),
+                                                flags=cv2.INTER_LINEAR,
+                                                borderMode=cv2.BORDER_REPLICATE)
+                        # Compute integral image
+                        ii = cv2.integral(warped)
+                        score = self.model.score_patch(ii, x_c, y_c,
+                                                       win_w=w_scaled,
+                                                       win_h=h_scaled)
+                        if score > best_score:
+                            best_score = score
+                            best = (x_c, y_c, w_scaled, h_scaled, theta)
 
-        # argmax - find the candidate location with the highest score
-        if cands:
-            best_score, best_loc, best_size = max(cands, key=lambda x: x[0])
-            self.loc = best_loc
-            self.w, self.h = best_size
+        if best:
+            cx, cy, self.w, self.h, self.angle = best
+            self.loc = (cx, cy)
 
         pos = self._sample_pos(self.loc)
         neg = self._sample_neg(self.loc)
-        self.model.train_frame(ii, pos, neg, win_w=self.w, win_h=self.h)
-        return self.loc
+        ii_base = cv2.integral(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+        self.model.train_frame(ii_base, pos, neg, win_w=self.w, win_h=self.h)
+
+        return self.loc[0], self.loc[1], self.w, self.h, self.angle

@@ -9,7 +9,7 @@
         }
     },
     "MIL": {
-        "M": 250,
+        "M": 150,
         "K": 50,
         "s_rad": 35,
         "pos_rad": 5,
@@ -17,10 +17,23 @@
         "num_neg": 65,
         "dynamic": true,
         "dyn_scale": 0.01,
-        "num_tries": 10,
+        "num_tries": 5,
         "lr": 0.85,
         "min_rects": 2,
-        "max_rects": 20
+        "max_rects": 20,
+        "num_angles": 5,
+        "max_delta": 10
+    },
+    "DFS": {
+        "bins": 16,
+        "sigma_s_list": [4.0, 2.0],
+        "sigma_f": 1.0,
+        "lambda_": 0.95,
+        "dynamic": true,
+        "dyn_scale": 0.3,
+        "num_tries": 10,
+        "num_angles": 5,
+        "max_delta": 10
     }
 }
 
