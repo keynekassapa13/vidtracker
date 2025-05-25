@@ -1,6 +1,6 @@
 [project]
 name = "vidtracker"
-version = "0.1.1"
+version = "0.1.2"
 description = "Video Object Tracking Toolkit"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -55,6 +55,12 @@ Extract the dataset into `data/input/` to match the folder structure shown below
 
 ## Installation
 
+### From PyPI:
+
+```bash
+pip install vidtracker
+```
+
 ### From GitHub:
 
 ```bash
@@ -69,7 +75,7 @@ cd vidtracker
 pip install .
 ```
 
-## 🖥 CLI Usage
+## CLI Usage
 
 ```bash
 python -m vidtracker.cli --input=data/input/cliffbar/imgs --output=data/output/cliffbar --tracker=DFS --show_frames
