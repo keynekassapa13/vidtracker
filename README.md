@@ -78,6 +78,11 @@ pip install .
 ## CLI Usage
 
 ```bash
+vidtracker --input=data/input/cliffbar/imgs --output=data/output/cliffbar --tracker=DFS --show_frames
+```
+or
+
+```bash
 python -m vidtracker.cli --input=data/input/cliffbar/imgs --output=data/output/cliffbar --tracker=DFS --show_frames
 ```
 
