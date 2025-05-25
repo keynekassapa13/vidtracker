@@ -73,7 +73,8 @@ def process_video(cfg):
         box   = np.int0(box)                # integer coords
         cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
 
-        cv2.imshow(f"{cfg.TRACK}Track", frame)
+        if cfg.SHOW_FRAMES:
+            cv2.imshow(f"{cfg.TRACK}Track", frame)
         logger.info(f"Frame {i}/{len(frames)-1}: {fname}")
 
         output_fname = os.path.join(cfg.OUTPUT.PATH, f"img{i:05d}.png")

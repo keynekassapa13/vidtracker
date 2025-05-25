@@ -6,6 +6,7 @@
         "PATH": "data/output/cliffbar"
     },
     "TRACKER": "DFS",
+    "SHOW_FRAMES": false,
     "MIL": {
         "M": 150,
         "K": 50,
