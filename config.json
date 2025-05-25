@@ -1,0 +1,49 @@
+{
+    "INPUT": {
+        "PATH": "data/input/cliffbar/imgs"
+    },
+    "OUTPUT": {
+        "PATH": "data/output/cliffbar"
+    },
+    "TRACKER": "DFS",
+    "SHOW_FRAMES": false,
+    "MIL": {
+        "M": 150,
+        "K": 50,
+        "s_rad": 35,
+        "pos_rad": 5,
+        "neg_rad": 50,
+        "num_neg": 65,
+        "dynamic": true,
+        "dyn_scale": 0.01,
+        "num_tries": 5,
+        "lr": 0.85,
+        "min_rects": 2,
+        "max_rects": 20,
+        "num_angles": 5,
+        "max_delta": 10
+    },
+    "DFS": {
+        "bins": 16,
+        "sigma_s_list": [4.0, 2.0],
+        "sigma_f": 1.0,
+        "lambda_": 0.95,
+        "s_rad": 16,
+        "dynamic": true,
+        "dyn_scale": 0,
+        "num_tries": 1,
+        "num_angles": 5,
+        "max_delta": 10
+    },
+    "LK": {
+        "max_corners": 3,
+        "quality_level": 0.01,
+        "min_distance": 7,
+        "block_size": 7,
+        "win_size": [15, 15],
+        "max_level": 3,
+        "min_track": 10
+    }
+}
+
+    
