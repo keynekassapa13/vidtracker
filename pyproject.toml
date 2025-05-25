@@ -1,10 +1,11 @@
 [project]
 name = "vidtracker"
-version = "0.1.0"
+version = "0.1.1"
 description = "Video Object Tracking Toolkit"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Keyne Oei", email = "keynekassapa13@gmail.com" }]
+requires-python = ">=3.8"
 dependencies = [
     "contourpy>=1.1.1",
     "cycler>=0.12.1",
@@ -27,6 +28,9 @@ dependencies = [
 
 [project.scripts]
 vidtracker = "vidtracker.cli:main"
+
+[tool.setuptools]
+packages = ["vidtracker"]
 
 [tool.setuptools.package-data]
 "vidtracker" = ["*.json"]
