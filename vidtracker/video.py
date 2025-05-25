@@ -20,7 +20,6 @@ import time
 
 def process_video(cfg):
     os.makedirs(cfg.OUTPUT.PATH, exist_ok=True)
-    out_vid = os.path.join(cfg.OUTPUT.PATH, cfg.OUTPUT.FILES.VIDEO)
 
     # show_haar_feature()
     # show_weak_classifier()
@@ -76,8 +75,13 @@ def process_video(cfg):
 
         cv2.imshow(f"{cfg.TRACK}Track", frame)
         logger.info(f"Frame {i}/{len(frames)-1}: {fname}")
+
+        output_fname = os.path.join(cfg.OUTPUT.PATH, f"img{i:05d}.png")
+        cv2.imwrite(output_fname, frame)
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+    
     cv2.destroyAllWindows()
 
     return

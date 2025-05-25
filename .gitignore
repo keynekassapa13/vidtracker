@@ -178,3 +178,4 @@ tmp/*
 
 # input
 data/input/*
+data/output/*
