@@ -14,6 +14,9 @@ from vidtracker.util import (
 )
 from vidtracker.mil import MILTracker
 from vidtracker.dfs import DFSTracker
+from vidtracker.lk import LKTracker
+
+import time
 
 def process_video(cfg):
     os.makedirs(cfg.OUTPUT.PATH, exist_ok=True)
@@ -46,6 +49,13 @@ def process_video(cfg):
             init_bbox=init_bbox,
             cfg=cfg
         )
+    elif cfg.TRACKER == "LK":
+        logger.info(f"Using LK Tracker with config: {cfg.LK}")
+        tracker = LKTracker(
+            first_frame=first_frame,
+            init_bbox=init_bbox,
+            cfg=cfg
+        )
     else:
         logger.error(f"Unsupported tracker type: {cfg.TRACKER}")
         return
@@ -56,6 +66,7 @@ def process_video(cfg):
         if frame is None:
             logger.error(f"Error reading frame: {fname}")
             continue
+        # cx = center x, cy = center y, w = width, h = height, angle = rotation angle
         cx, cy, w, h, angle = tracker.process_frame(frame)
         # define the rotated rect
         rect  = ((cx, cy), (w, h), angle)

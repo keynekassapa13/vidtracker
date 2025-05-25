@@ -8,7 +8,7 @@
             "VIDEO": "annotated_video.mp4"
         }
     },
-    "TRACKER": "DFS",
+    "TRACKER": "LK",
     "MIL": {
         "M": 150,
         "K": 50,
@@ -36,6 +36,15 @@
         "num_tries": 1,
         "num_angles": 5,
         "max_delta": 10
+    },
+    "LK": {
+        "max_corners": 3,
+        "quality_level": 0.01,
+        "min_distance": 7,
+        "block_size": 7,
+        "win_size": [15, 15],
+        "max_level": 3,
+        "min_track": 10
     }
 }
 
