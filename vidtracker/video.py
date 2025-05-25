@@ -74,7 +74,7 @@ def process_video(cfg):
         cv2.drawContours(frame, [box], 0, (0, 255, 0), 2)
 
         if cfg.SHOW_FRAMES:
-            cv2.imshow(f"{cfg.TRACK}Track", frame)
+            cv2.imshow(f"{cfg.TRACKER}Track", frame)
         logger.info(f"Frame {i}/{len(frames)-1}: {fname}")
 
         output_fname = os.path.join(cfg.OUTPUT.PATH, f"img{i:05d}.png")
