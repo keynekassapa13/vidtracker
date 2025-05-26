@@ -6,6 +6,7 @@ Sevilla-Lara et al. (2012)
 
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 
 # Explode function
@@ -58,15 +59,25 @@ def convolve(img, kernel):
     """
     h, w = img.shape
     kh, kw = kernel.shape
-    pad = np.zeros((h, w), dtype=np.float32)
-    pad[:kh, :kw] = kernel
-    pad = np.roll(np.roll(pad, -kh//2, axis=0), -kw//2, axis=1)
-    
-    # Perform FFT convolution
+    pad_h = kh - 1
+    pad_w = kw - 1
+    img_p = np.pad(img, 
+                   ((pad_h, pad_h),
+                    (pad_w, pad_w)),
+                   mode='constant', constant_values=0).astype(np.float32)
+    ker_p = np.zeros_like(img_p, dtype=np.float32)
+    ker_p[:kh, :kw] = kernel
+    ker_p = np.roll(np.roll(ker_p, -kh//2, axis=0), -kw//2, axis=1)
     # Convolve in frequency domain
     # Transform back to spatial domain
     # and take the real part
-    return np.fft.ifft2(np.fft.fft2(img) * np.fft.fft2(pad)).real
+    fft_img = np.fft.fft2(img_p)
+    fft_ker = np.fft.fft2(ker_p)
+    conv_p = np.fft.ifft2(fft_img * fft_ker).real
+    start_h = pad_h - (kh // 2)
+    start_w = pad_w - (kw // 2)
+    out = conv_p[start_h:start_h+h, start_w:start_w+w]
+    return out
 
 class DFSTracker:
     def __init__(self, first_frame, init_bbox, cfg):
@@ -81,6 +92,9 @@ class DFSTracker:
                 cfg.DFS.lambda_: Update rate for the model
         """
         x, y, w, h = init_bbox
+        self.num_workers   = cfg.NUM_WORKERS
+        self.sample        = cfg.SAMPLE
+
         self.bins          = cfg.DFS.bins
         self.sigma_s_list  = cfg.DFS.sigma_s_list
         self.sigma_f       = cfg.DFS.sigma_f
@@ -95,7 +109,7 @@ class DFSTracker:
         self.num_angles = cfg.DFS.num_angles
         self.dynamic = cfg.DFS.dynamic
         self.dyn_scale = cfg.DFS.dyn_scale
-        self.num_tries = cfg.DFS.num_tries
+        self.dyn_tries = cfg.DFS.dyn_tries
 
         gray = cv2.cvtColor(first_frame, cv2.COLOR_BGR2GRAY)
         patch = gray[y:y+h, x:x+w]
@@ -174,68 +188,81 @@ class DFSTracker:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         H, W = gray.shape
 
-        best_cost   = np.inf
-        best_params = None
-
         angles = np.linspace(self.angle - self.max_delta,
                             self.angle + self.max_delta,
                             self.num_angles)
 
-        nt = self.num_tries if self.dynamic else 1
-        for _ in range(nt):
-            if self.dynamic:
-                ds = random.uniform(-self.dyn_scale, self.dyn_scale)
-                s  = 1.0 + ds
-            else:
-                s = 1.0
-
-            w_s = int(self.w * s)
-            h_s = int(self.h * s)
+        scales = (
+                    np.linspace(1.0 - self.dyn_scale,
+                                1.0 + self.dyn_scale,
+                                self.dyn_tries)
+                    .tolist()
+                    if self.dynamic
+                    else [1.0]
+                )
+        # 1. Build all candidate tasks
+        tasks = []
+        for s in scales:
+            w_s, h_s = int(self.w*s), int(self.h*s)
             half_w, half_h = w_s//2, h_s//2
-            
-            for theta in angles:
-                M      = cv2.getRotationMatrix2D((self.cx, self.cy), theta, 1.0)
+            for angle in angles:
+                # warp once per (s, theta)
+                M = cv2.getRotationMatrix2D((self.cx, self.cy), angle, 1.0)
                 warped = cv2.warpAffine(gray, M, (W, H),
                                         flags=cv2.INTER_LINEAR,
                                         borderMode=cv2.BORDER_REPLICATE)
-                
-                for dx in range(-self.s_rad, self.s_rad + 1, 4):
-                    for dy in range(-self.s_rad, self.s_rad + 1, 4):
+                for dx in range(-self.s_rad, self.s_rad+1, 4):
+                    for dy in range(-self.s_rad, self.s_rad+1, 4):
                         x0 = int(self.cx - half_w) + dx
                         y0 = int(self.cy - half_h) + dy
-
-                        if (x0 < 0 or y0 < 0 or
-                            x0 + w_s > W or y0 + h_s > H):
+                        if x0 < 0 or y0 < 0 or x0 + w_s > W or y0 + h_s > H:
                             continue
+                        tasks.append((warped, x0, y0, w_s, h_s, s, angle))
 
-                        patch = warped[y0:y0+h_s, x0:x0+w_s]
-                        patch = cv2.resize(patch, (self.w, self.h))
+        n = min(self.sample, len(tasks))
+        tasks = random.sample(tasks, n)
 
-                        df = explode(patch, self.bins)
-                        df = self.smooth_spatial(df, self.sigma_s_list[0])
-                        df = self.smooth_feature(df)
+        # 2. Define worker function
+        def eval_patch(args):
+            warped, x0, y0, w_s, h_s, s, theta = args
+            patch = warped[y0:y0+h_s, x0:x0+w_s]
+            patch = cv2.resize(patch, (self.w, self.h))
+            df_base = explode(patch, self.bins)
+            cost = 0.0
+            for sigma_s, model in zip(self.sigma_s_list, self.models):
+                df_s = self.smooth_spatial(df_base, sigma_s)
+                df_s = self.smooth_feature(df_s)
+                cost += np.sum(np.abs(df_s - model))
 
-                        cost = 0.0
-                        for model in self.models:
-                            df2 = self.smooth_spatial(df, self.sigma_s_list[0])
-                            df2 = self.smooth_feature(df2)
-                            cost += np.sum(np.abs(df2 - model))
+            return cost, (x0, y0, s, theta)
 
-                        if cost < best_cost:
-                            best_cost   = cost
-                            best_params = (x0, y0, s, theta)
+        best_cost = np.inf
+        best_params = None
+        # for task in tasks:
+        #     cost, params = eval_patch(task)
+        #     if cost < best_cost:
+        #         best_cost, best_params = cost, params
+        
+        # 3. Run in parallel
+        with ThreadPoolExecutor(max_workers=self.num_workers) as pool:
+            futures = [pool.submit(eval_patch, t) for t in tasks]
+            for f in as_completed(futures):
+                cost, params = f.result()
+                if cost < best_cost:
+                    best_cost, best_params = cost, params
 
+        # 4. Pick the best
         if best_params is not None:
-            x0, y0, s, theta = best_params
-            self.angle = theta
-            self.cx    = x0 + int(self.w * s / 2)
-            self.cy    = y0 + int(self.h * s / 2)
-
+            x0, y0, s, θ = best_params
+            self.angle = θ
+            self.cx = x0 + int(self.w*s/2)
+            self.cy = y0 + int(self.h*s/2)
             gray_patch = gray[y0:y0+int(self.h*s), x0:x0+int(self.w*s)]
             gray_patch = cv2.resize(gray_patch, (self.w, self.h))
             new_models = self.build_model(gray_patch)
+            # 5. Update status 
             for i in range(len(self.models)):
-                self.models[i] = ( self.lambda_ * self.models[i]
-                                + (1-self.lambda_) * new_models[i] )
+                self.models[i] = ( self.lambda_*self.models[i]
+                                  + (1-self.lambda_)*new_models[i] )
 
-        return self.cx, self.cy, int(self.w * s), int(self.h * s), self.angle
+        return self.cx, self.cy, int(self.w*s), int(self.h*s), self.angle
