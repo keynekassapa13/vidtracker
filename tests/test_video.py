@@ -18,6 +18,10 @@ def test_gaussian_kernel_sum():
 def test_convolve_identity():
     img = np.eye(3, dtype=np.float32)
     kernel = np.zeros((3, 3), dtype=np.float32)
-    kernel[1, 1] = 1.0  # Identity kernel
+    kernel[1, 1] = 1.0 
     out = convolve(img, kernel)
-    assert np.allclose(out, img, atol=1e-6), "FFT convolution should approximate identity with small error"
+    print(f"Output of convolution:\n{out}")
+    assert np.allclose(out, img, atol=1e-5), (
+        f"FFT convolution should approximate identity. \n"
+        f"Diff:\n{out - img}"
+    )

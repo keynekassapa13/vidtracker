@@ -18,6 +18,38 @@ from vidtracker.lk import LKTracker
 
 import time
 
+def show_video(cfg):
+    """
+    Show the video frames with the selected tracker.
+    """
+    frames = sorted(glob.glob(os.path.join(cfg.OUTPUT.PATH, "img*.png")))
+    if not frames:
+        logger.error(f"No frames found in {cfg.OUTPUT.PATH}")
+        return
+    frame = cv2.imread(frames[0])
+    if frame is None:
+        logger.error(f"Error reading first frame: {frames[0]}")
+        return
+    h, w = frame.shape[:2]
+    fps = cfg.OUTPUT.FPS if cfg.OUTPUT.FPS else 30
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(os.path.join(cfg.OUTPUT.PATH, "vid.mp4"), fourcc, fps, (w, h))
+    for i, fname in enumerate(frames):
+        frame = cv2.imread(fname)
+        if frame is None:
+            logger.error(f"Error reading frame: {fname}")
+            continue
+        writer.write(frame)
+        cv2.imshow("Video", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+        logger.info(f"Frame {i+1}/{len(frames)}: {fname}")
+        time.sleep(1 / fps) 
+
+    logger.success(f"Video saved to {os.path.join(cfg.OUTPUT.PATH, 'vid.mp4')}")
+    writer.release()
+    cv2.destroyAllWindows()
+
 def process_video(cfg):
     os.makedirs(cfg.OUTPUT.PATH, exist_ok=True)
 
@@ -84,5 +116,6 @@ def process_video(cfg):
             break
     
     cv2.destroyAllWindows()
+    logger.success(f"Processed {len(frames)} frames. Output saved to {cfg.OUTPUT.PATH}")
 
     return
